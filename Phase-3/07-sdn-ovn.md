@@ -1,5 +1,39 @@
-# Module 7: SDN vs OVN-Kubernetes (Pod Networking)
-## Lecture Transcript (~50 minutes)
+# Module 7: OVN-Kubernetes Networking (Pod Networking)
+
+---
+
+## 📚 DEFINITIONS & KEY CONCEPTS
+
+Before we start the lecture, here are the key terms you MUST know:
+
+### What is Pod Networking?
+
+**Pod Networking** is how containers (pods) communicate with each other across a Kubernetes cluster. Since pods are ephemeral and can be on any node, we need a virtual network that makes them all appear to be on the same flat network.
+
+### Key Terms
+
+| Term | Definition |
+|------|------------|
+| **SDN (Software Defined Network)** | A virtual network created by software, overlaid on top of the physical network. Allows pods to communicate as if they're on the same LAN, even when they're on different physical servers. |
+| **OVN-Kubernetes** | OpenShift's network plugin (since 4.12+, ONLY option in 4.14+). Based on Open Virtual Network and Open vSwitch. Handles all pod-to-pod traffic. |
+| **Pod CIDR** | The IP address range for pods. Example: `10.128.0.0/14`. Each node gets a slice of this for its pods. |
+| **Service CIDR** | A separate IP range for Kubernetes Services. Example: `172.30.0.0/16`. Services provide stable endpoints for pods. |
+| **CNI (Container Network Interface)** | The standard API that Kubernetes uses to configure pod networking. OVN-Kubernetes is a CNI plugin. |
+| **Overlay Network** | A network built on top of another network. Pod traffic is encapsulated (wrapped) and sent through the physical network. |
+| **Encapsulation** | Wrapping one packet inside another. Pod packets get wrapped in a physical network packet for transport. |
+| **ClusterIP** | The internal IP assigned to a Service. Only reachable from inside the cluster. |
+| **CoreDNS** | The DNS server inside OpenShift that resolves service names to ClusterIPs. |
+| **FQDN** | Fully Qualified Domain Name. For services: `<service>.<namespace>.svc.cluster.local` |
+
+### The One Rule to Remember
+
+> **Every pod can talk to every other pod directly, without NAT, regardless of which node they're on.**
+
+This is the "flat network" model. The SDN makes this possible.
+
+---
+
+## 🎬 LECTURE TRANSCRIPT (~50 minutes)
 
 ---
 
@@ -69,25 +103,17 @@ Pod A (10.128.0.5) wants to reach Pod C (10.129.0.8).
 
 From Pod A's perspective, it just sends a packet to 10.129.0.8. It doesn't know or care that Pod C is on a different node. It just works."
 
-[CHECK]
+[SLIDE - How the SDN Makes This Work]
 
-"But how? The physical switch between Node 1 and Node 2 has no idea what 10.129.0.8 is. That IP isn't in its routing tables."
+"Here's what happens under the hood:
 
-[PAUSE]
-
-[SLIDE - "Software Defined Networking to the Rescue"]
-
-"This is where SDN - Software Defined Networking - comes in.
-
-Think of it like this: We're building an INVISIBLE tunnel system between all the nodes.
-
-When Pod A sends a packet to 10.129.0.8:
-1. The SDN on Node 1 intercepts it
-2. It wraps (encapsulates) the packet inside another packet
-3. The outer packet is addressed to Node 2's REAL IP (192.168.1.11)
-4. The physical network delivers it to Node 2
-5. Node 2's SDN unwraps it
-6. The inner packet gets delivered to Pod C
+1. Pod A sends packet to 10.129.0.8
+2. OVN on Node 1 intercepts it
+3. OVN wraps (encapsulates) the packet inside another packet
+4. The outer packet is addressed to Node 2's REAL IP (192.168.1.11)
+5. The physical network delivers it to Node 2
+6. OVN on Node 2 unwraps it
+7. The inner packet gets delivered to Pod C
 
 The physical network only sees traffic between 192.168.1.10 and 192.168.1.11. It has no idea there's pod traffic inside!"
 
@@ -99,114 +125,59 @@ Same concept. Pods think they're on one big flat network. But underneath, it's t
 
 ---
 
-### Section 2: OpenShift SDN vs OVN-Kubernetes (10 mins)
+### Section 2: OVN-Kubernetes - The Modern Network (8 mins)
 
-[SLIDE - "Two Network Plugins"]
+[SLIDE - "The Evolution of OpenShift Networking"]
 
-"OpenShift gives you two options for implementing this virtual network:
+"Quick history lesson:
 
-1. **OpenShift SDN** - The original. Been around since OpenShift 3.
-2. **OVN-Kubernetes** - The new default since OpenShift 4.12.
+- **OpenShift 3.x and early 4.x:** Used 'OpenShift SDN'
+- **OpenShift 4.12+:** OVN-Kubernetes became the default
+- **OpenShift 4.14+:** OpenShift SDN is officially DEPRECATED"
 
-Both use Open vSwitch (OVS) under the hood. But they work quite differently."
+[SLIDE - Deprecation Warning]
 
-[SLIDE - Comparison Table]
+"> ⚠️ **IMPORTANT**: OpenShift SDN is deprecated as of OpenShift 4.14!
+>
+> - New clusters can ONLY use OVN-Kubernetes
+> - Existing clusters must migrate to OVN-Kubernetes
+> - Red Hat will remove OpenShift SDN support in a future release"
 
-"Let me break down the key differences:
+[SLIDE - OVN-Kubernetes Features]
 
-| Feature | OpenShift SDN | OVN-Kubernetes |
-|---------|---------------|-----------------|
-| **IPv6 Support** | ❌ No | ✅ Yes |
-| **Egress IP** | Basic | Advanced (multiple IPs) |
-| **Network Policies** | Basic | Full Kubernetes compliance |
-| **Windows Nodes** | ❌ No | ✅ Yes |
-| **Hybrid Overlay** | ❌ No | ✅ Yes (mix of modes) |
-| **Default since 4.12** | ❌ No | ✅ Yes |
+"OVN-Kubernetes is the ONLY network plugin for modern OpenShift. Here's what it provides:
 
-[PAUSE]
+| Feature | Description |
+|---------|-------------|
+| **IPv6 Dual-Stack** | Run IPv4 and IPv6 simultaneously |
+| **Egress IP** | Fixed source IPs for outbound traffic (for firewall rules) |
+| **Network Policies** | Full Kubernetes-compliant traffic control |
+| **IPsec Encryption** | Encrypt pod-to-pod traffic |
+| **Admin Network Policy** | Cluster-wide security policies |
+| **Hardware Offload** | Use SmartNICs for better performance |
 
-"Bottom line: If you're on a modern OpenShift cluster (4.12+), you're using OVN-Kubernetes. It's more capable."
-
-[CHECK]
-
-"Question: Why would anyone use OpenShift SDN today?
-
-Answer: Legacy. They upgraded from older versions and didn't switch. But new clusters should always use OVN."
+OVN = Open Virtual Network. Built on Open vSwitch (OVS) - battle-tested technology used by VMware, OpenStack, and others."
 
 [TERMINAL]
 
-[SLIDE - "Let's check what YOU'RE using"]
-
-"Time for our first command. Let's find out which network plugin your cluster uses."
+"Let's verify YOUR cluster uses OVN-Kubernetes:"
 
 ```bash
 oc get network cluster -o jsonpath='{.status.networkType}'
 ```
 
-[BREAKDOWN]
-
-"Let me explain this command:
-- `oc get network` - Get the Network configuration resource
-- `cluster` - There's only one, and it's named 'cluster'
-- `-o jsonpath='{.status.networkType}'` - Extract just the networkType field
-
-"
-
 [WHAT THEY'LL SEE]
 
-"You should see either:
+"You should see:
 ```
 OVNKubernetes
-```
-or
-```
-OpenShiftSDN
-```
-
-On CRC, it's OVNKubernetes."
-
-[PAUSE]
-
-"Let's also check the network CIDRs - the IP ranges used for pods and services:"
-
-```bash
-oc get network cluster -o yaml | grep -A5 clusterNetwork
-```
-
-[WHAT THEY'LL SEE]
-
-"You'll see something like:
-```yaml
-clusterNetwork:
-- cidr: 10.128.0.0/14
-  hostPrefix: 23
-```
-
-This means:
-- `10.128.0.0/14` - The overall pod network (about 262,000 IPs)
-- `hostPrefix: 23` - Each node gets a /23 (512 IPs for pods on that node)"
-
-[ADDITIONAL CONTEXT]
-
-"Let's also check the service network:"
-
-```bash
-oc get network cluster -o yaml | grep serviceNetwork
-```
-
-"You'll see something like:
-```yaml
-serviceNetwork:
-- 172.30.0.0/16
-```
-
-This is where ClusterIP services get their IPs. Different from the pod network!"
+```"
 
 ---
 
-### Section 3: Let's PROVE Pod Networking Works! (15 mins)
+### Section 3: Hands-On - Pod Networking in Action (15 mins)
 
-[SLIDE - "Hands-On Time!"]
+[SLIDE - "Let's PROVE It Works!"]
 
 "Enough theory! Let's actually watch pod networking in action."
 
@@ -218,26 +189,16 @@ This is where ClusterIP services get their IPs. Different from the pod network!"
 oc new-project network-demo
 ```
 
-"We're using a fresh project so we don't interfere with anything else."
-
 [PAUSE]
 
-"**Step 2: Deploy two pods**
-
-We'll use nginx because it has both a web server AND network tools like curl."
+"**Step 2: Deploy two pods**"
 
 ```bash
 oc run pod-a --image=nginx
 oc run pod-b --image=nginx
 ```
 
-[EXPLAIN]
-
-"We're creating two simple pods:
-- `pod-a` - Our first pod
-- `pod-b` - Our second pod
-
-They're running nginx, which listens on port 80."
+"We're using nginx because it has a web server AND network tools."
 
 "**Step 3: Wait for them to be running**"
 
@@ -247,22 +208,16 @@ oc get pods -w
 
 [WHAT THEY'LL SEE]
 
-"You'll see:
+"Wait until both show `1/1 Running`. Press Ctrl+C to stop watching.
 ```
-NAME    READY   STATUS              RESTARTS   AGE
-pod-a   0/1     ContainerCreating   0          5s
-pod-b   0/1     ContainerCreating   0          3s
-pod-a   1/1     Running             0          8s
-pod-b   1/1     Running             0          10s
-```
-
-Wait until both show `1/1 Running`. Press Ctrl+C to stop watching."
+NAME    READY   STATUS    
+pod-a   1/1     Running   
+pod-b   1/1     Running   
+```"
 
 [PAUSE - wait for pods]
 
-"**Step 4: Check their IP addresses**
-
-This is where it gets interesting!"
+"**Step 4: Check their IP addresses**"
 
 ```bash
 oc get pods -o wide
@@ -272,45 +227,27 @@ oc get pods -o wide
 
 "You'll see something like:
 ```
-NAME    READY   STATUS    IP           NODE
-pod-a   1/1     Running   10.128.0.85  crc
-pod-b   1/1     Running   10.128.0.86  crc
+NAME    READY   IP           NODE
+pod-a   1/1     10.128.0.85  crc
+pod-b   1/1     10.128.0.86  crc
 ```
 
-Look at those IP addresses! They're from the pod network (10.128.x.x), not the node's IP."
+Those IPs are from the pod network (10.128.x.x), NOT the node's IP!"
 
-[PAUSE]
-
-[SLIDE - "Now Let's Test Connectivity!"]
-
-"**Step 5: Get pod-b's IP address into a variable**"
+"**Step 5: Test pod-to-pod connectivity**"
 
 ```bash
+# Get pod-b's IP
 POD_B_IP=$(oc get pod pod-b -o jsonpath='{.status.podIP}')
 echo "Pod B's IP is: $POD_B_IP"
-```
 
-[WHAT THEY'LL SEE]
-
-"Should print something like: `Pod B's IP is: 10.128.0.86`"
-
-"**Step 6: THE MOMENT OF TRUTH - Can pod-a reach pod-b?**"
-
-```bash
+# From pod-a, curl pod-b
 oc exec pod-a -- curl -s http://$POD_B_IP
 ```
 
-[BREAKDOWN]
-
-"Let me explain:
-- `oc exec pod-a` - Run a command inside pod-a
-- `--` - Everything after this goes to the container
-- `curl -s http://$POD_B_IP` - Make an HTTP request to pod-b's IP
-- `-s` means silent (no progress bar)"
-
 [WHAT THEY'LL SEE]
 
-"You'll see the nginx welcome page HTML:
+"You'll see nginx's welcome page HTML:
 ```html
 <!DOCTYPE html>
 <html>
@@ -319,46 +256,30 @@ oc exec pod-a -- curl -s http://$POD_B_IP
 ...
 ```
 
-🎉 IT WORKS! Pod A just talked to Pod B using the virtual network!"
-
-[CELEBRATE]
-
-"Think about what just happened:
-1. We ran curl inside pod-a
-2. It sent a request to pod-b's virtual IP
-3. The SDN delivered that packet
-4. nginx in pod-b responded
-5. We got the response back in pod-a
-
-All across this invisible virtual network!"
+🎉 Pod A just talked to Pod B across the virtual network!"
 
 ---
 
-### Section 4: DNS - The Real Way Pods Communicate (8 mins)
+### Section 4: DNS - The Real Way Pods Communicate (10 mins)
 
-[SLIDE - "Nobody Uses IP Addresses"]
+[SLIDE - "Services and DNS"]
 
-"In the real world, you don't hardcode IP addresses. Pods come and go. IPs change.
+"In production, you NEVER hardcode IP addresses. Pods come and go. IPs change.
 
-Instead, we use DNS names. And OpenShift has built-in DNS!"
+Instead, we use Services which provide:
+1. A stable IP (ClusterIP)
+2. A DNS name
+3. Load balancing across pods"
 
 [TERMINAL]
 
-"**Step 1: Create a Service for pod-b**
-
-Services give pods a stable DNS name."
+"**Step 1: Create a Service for pod-b**"
 
 ```bash
 oc expose pod pod-b --port=80
 ```
 
-[EXPLAIN]
-
-"This creates a Service named `pod-b` that points to our pod. Now pod-b has a DNS name!"
-
-"**Step 2: Test DNS resolution**
-
-Let's prove DNS works:"
+"**Step 2: Test DNS resolution**"
 
 ```bash
 oc exec pod-a -- nslookup pod-b
@@ -366,8 +287,7 @@ oc exec pod-a -- nslookup pod-b
 
 [WHAT THEY'LL SEE]
 
-"You'll see:
-```
+"```
 Server:    172.30.0.10
 Address:   172.30.0.10#53
 
@@ -376,203 +296,139 @@ Address:   172.30.xxx.xxx
 ```
 
 Breaking this down:
-- `Server: 172.30.0.10` - That's the cluster's DNS server (CoreDNS)
-- `Name: pod-b.network-demo.svc.cluster.local` - The full DNS name
-- `Address: 172.30.xxx.xxx` - The Service's ClusterIP (not the pod IP!)"
+- `172.30.0.10` = CoreDNS server
+- `pod-b.network-demo.svc.cluster.local` = Full DNS name
+- `172.30.xxx.xxx` = Service ClusterIP (NOT pod IP!)"
 
-[PAUSE - important distinction]
-
-"Notice the Service has a DIFFERENT IP than the pod! The Service IP is from the `serviceNetwork` (172.30.x.x), not the pod network (10.128.x.x).
-
-Why? Because the Service is an abstraction. It could have multiple pods behind it. It's a stable endpoint."
-
-"**Step 3: Access pod-b using DNS**"
+"**Step 3: Access using DNS name**"
 
 ```bash
 oc exec pod-a -- curl -s http://pod-b
 ```
 
-[WHAT THEY'LL SEE]
+"Same nginx page! But now using the DNS name."
 
-"Same nginx welcome page! But this time we used the DNS name `pod-b`, not the IP."
+[SLIDE - "DNS Name Format"]
 
-[SLIDE - "DNS Name Formats"]
-
-"Let me teach you the DNS naming convention:
-
-**Full name (FQDN):**
+"The full format is:
 ```
-pod-b.network-demo.svc.cluster.local
+<service>.<namespace>.svc.cluster.local
 ```
 
-Broken down:
-- `pod-b` - Service name
-- `network-demo` - Namespace
-- `svc` - It's a Service (not a pod)
-- `cluster.local` - Default cluster domain
-
-**From same namespace, you can use short form:**
+From the same namespace, you can use just:
 ```
-pod-b
+<service>
 ```
 
-**From different namespace:**
+From different namespace:
 ```
-pod-b.network-demo
-```
-"
-
-[TERMINAL]
-
-"Let's prove the short name works:"
-
-```bash
-oc exec pod-a -- curl -s http://pod-b.network-demo.svc.cluster.local
-```
-
-"Same result! Both the short and long name work."
+<service>.<namespace>
+```"
 
 ---
 
-### Section 5: Debugging Network Issues (8 mins)
+### Section 5: Troubleshooting Network Issues (5 mins)
 
-[SLIDE - "When Things Break"]
+[SLIDE - "Debug Commands"]
 
-"Networks fail. Here's how to troubleshoot pod networking issues like a pro."
-
-[TERMINAL]
-
-"**Debug Tool 1: Check DNS Resolution**
-
-If pods can't find each other by name, it might be DNS:"
+"When networking breaks, here's your troubleshooting toolkit:"
 
 ```bash
-oc exec pod-a -- nslookup kubernetes.default
-```
+# 1. Check DNS
+oc exec <pod> -- nslookup kubernetes.default
 
-[WHAT THEY'LL SEE]
-
-"You should see:
-```
-Server:    172.30.0.10
-Address:   172.30.0.10#53
-
-Name:      kubernetes.default.svc.cluster.local
-Address:   172.30.0.1
-```
-
-If this fails, DNS is broken. Check CoreDNS pods."
-
-"**Debug Tool 2: Check CoreDNS pods**"
-
-```bash
+# 2. Check CoreDNS pods
 oc get pods -n openshift-dns
+
+# 3. Check pod-to-pod connectivity
+oc exec <pod> -- curl -s http://<target-ip>
+
+# 4. Check external connectivity
+oc exec <pod> -- curl -s https://google.com --max-time 5
+
+# 5. Check network type
+oc get network cluster -o yaml
 ```
 
-[WHAT THEY'LL SEE]
+[SLIDE - Common Problems]
 
-"You should see healthy DNS pods:
-```
-NAME                  READY   STATUS
-dns-default-xxxxx     2/2     Running
-dns-default-yyyyy     2/2     Running
-```
-
-If they're not Running, you found your problem!"
-
-"**Debug Tool 3: Check connectivity to external internet**"
-
-```bash
-oc exec pod-a -- curl -s -o /dev/null -w "%{http_code}\n" https://google.com --max-time 5
-```
-
-[BREAKDOWN]
-
-"- `-s` - Silent
-- `-o /dev/null` - Discard the page content
-- `-w \"%{http_code}\\n\"` - Just print the HTTP status code
-- `--max-time 5` - Timeout after 5 seconds"
-
-[WHAT THEY'LL SEE]
-
-"You should see `200` (success). If you see nothing or an error, egress is blocked."
-
-"**Debug Tool 4: Get raw pod events**"
-
-```bash
-oc describe pod pod-a | tail -20
-```
-
-"The Events section at the bottom shows network-related issues like 'NetworkNotReady'."
-
-[SLIDE - "Common Network Problems"]
-
-"Here's a cheat sheet of issues I see most often:
-
-| Problem | Symptom | Solution |
-|---------|---------|----------|
-| DNS not working | `nslookup` fails | Check openshift-dns pods |
-| Can't reach external | `curl google.com` times out | Check Egress/NetworkPolicy |
-| Pod to pod fails | `curl $POD_IP` times out | Check NetworkPolicy |
-| No pod IP assigned | Pod stuck in ContainerCreating | Check node network plugin |
-| Service doesn't work | DNS resolves but curl fails | Check Service selector matches pod labels |
-
-"
+| Problem | Check This |
+|---------|------------|
+| DNS not resolving | CoreDNS pods in openshift-dns |
+| Can't reach external | Egress settings, NetworkPolicy |
+| Pod-to-pod fails | NetworkPolicy blocking |
+| Service not working | Service selector matches pod labels |
 
 ---
 
-### Wrap-up (3 mins)
+### Wrap-up (2 mins)
 
-[SLIDE - "What We Learned Today"]
+[SLIDE - "Key Takeaways"]
 
-"Let's recap Module 7:
+"Module 7 Summary:
 
-1. **Flat network model** - Every pod can reach every pod, directly
-
-2. **SDN creates the overlay** - Virtual network on top of physical
-
-3. **OVN-Kubernetes is the modern default** - IPv6, full Network Policy, Windows support
-
-4. **Pod IPs vs Service IPs** - Different networks! 10.128.x.x vs 172.30.x.x
-
-5. **DNS for service discovery** - `<service>.<namespace>.svc.cluster.local`
-
-6. **Debugging order** - DNS first, then connectivity, then policies"
-
-[SLIDE - "Cheat Sheet"]
-
-```bash
-# Check network type
-oc get network cluster -o jsonpath='{.status.networkType}'
-
-# Get pod IPs
-oc get pods -o wide
-
-# Test pod-to-pod
-oc exec <pod> -- curl -s http://<target-pod-ip>
-
-# Test DNS
-oc exec <pod> -- nslookup <service-name>
-
-# Check CoreDNS
-oc get pods -n openshift-dns
-```
-
-[SLIDE - "Next Up"]
-
-"Next module: Ingress and Egress! 
-
-We learned how pods talk to EACH OTHER. But how does the OUTSIDE world reach your pods? And how do your pods reach the internet?
-
-That's what Routes, Ingress, and Egress IPs are for. See you in Module 8!"
-
-[CHECK]
-
-"Any questions about pod networking before we wrap up?"
+1. **Flat network model** - Every pod can reach every pod
+2. **OVN-Kubernetes** - The ONLY network plugin for OpenShift 4.14+
+3. **Encapsulation** - Pod traffic wrapped in node-to-node tunnels
+4. **Services provide DNS** - `<svc>.<ns>.svc.cluster.local`
+5. **Always use DNS** - Never hardcode pod IPs"
 
 ---
 
-## 📝 Presenter Notes
+## 🌍 REAL-WORLD SIGNIFICANCE
+
+### Why This Matters in Production
+
+#### Scenario 1: Microservices Communication
+"In a real microservices architecture, you might have:
+- 50 frontend pods
+- 30 API gateway pods  
+- 100 backend service pods
+- 20 database pods
+
+ALL of these need to talk to each other seamlessly. The flat network model makes this possible without complex routing configurations."
+
+#### Scenario 2: Multi-Tenant Clusters
+"When multiple teams share a cluster, they all get their own namespaces. Team A's pods can talk to Team B's pods using DNS names:
+```
+team-b-api.team-b-namespace.svc.cluster.local
+```
+No firewall rules to configure. It just works."
+
+#### Scenario 3: Debugging Production Issues
+"When a production incident happens at 3 AM:
+```bash
+# Quick connectivity check
+oc exec frontend-pod -- curl -s http://backend-api:8080/health
+
+# DNS check
+oc exec frontend-pod -- nslookup backend-api
+```
+Understanding pod networking lets you diagnose issues in minutes, not hours."
+
+#### Scenario 4: Security Compliance
+"With OVN-Kubernetes, you get:
+- **IPsec encryption** - Required for PCI-DSS, HIPAA
+- **Network Policies** - Segment traffic between namespaces
+- **Egress IP** - All traffic from a namespace exits with a known IP (for firewall rules)"
+
+### Interview Questions You'll Face
+
+1. **"How do pods communicate across nodes?"**
+   → Encapsulation/tunneling through the SDN
+
+2. **"What's the difference between Pod IP and Service IP?"**
+   → Pod IPs are ephemeral (10.128.x.x), Service IPs are stable (172.30.x.x)
+
+3. **"How does DNS work in Kubernetes?"**
+   → CoreDNS resolves `<svc>.<ns>.svc.cluster.local` to ClusterIP
+
+4. **"What network plugin does OpenShift use?"**
+   → OVN-Kubernetes (OpenShift SDN is deprecated in 4.14+)
+
+---
+
+## 📝 PRESENTER NOTES
 
 ### Before the session:
 - Have CRC running
@@ -584,11 +440,8 @@ That's what Routes, Ingress, and Egress IPs are for. See you in Module 8!"
 **"Why are pod IPs and service IPs different?"**
 → Different purposes. Pod IPs are per-pod and change. Service IPs are stable. Services load-balance across pods.
 
-**"Can I SSH into the node to see the network?"**
-→ In production, no (immutable). On CRC, you can with `oc debug node/crc`. But we avoid this.
-
-**"What if pods are on different nodes?"**
-→ Same result! SDN handles the encapsulation. The demo works the same regardless of node placement.
+**"What if pods are on different nodes?"**  
+→ Same result! OVN handles the encapsulation. Demo works the same regardless of node placement.
 
 ### If something fails:
 
@@ -596,12 +449,7 @@ That's what Routes, Ingress, and Egress IPs are for. See you in Module 8!"
 → Wait longer, or check events: `oc describe pod <name>`
 
 **curl times out:**
-→ Check if it's an SCC issue. nginx-unprivileged might work better.
+→ Check if it's an SCC issue. Try `nginxinc/nginx-unprivileged` image.
 
 **nslookup command not found:**
-→ Some minimal images don't have it. Use `getent hosts <name>` instead.
-
-### Extensions if you have time:
-- Show `oc get endpoints` to see how Services discover pods
-- Demonstrate what happens when you scale up: IPs added to endpoint
-- Show the actual OVS flows (advanced, requires node access)
+→ Use `getent hosts <name>` instead.
