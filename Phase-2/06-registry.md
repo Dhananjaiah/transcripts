@@ -454,6 +454,251 @@ RUNNING! 🎉 Your pod is using YOUR image from YOUR internal registry!"
 
 ---
 
+### Section 7: The Magic of ImageStream Triggers! (15 mins)
+
+[SLIDE - "Why ImageStreams are AMAZING"]
+
+"Okay, now I'm going to show you the REAL power of ImageStreams. This is the 'aha!' moment.
+
+Here's the scenario:
+- You have a Deployment running version 1 of your app
+- You build version 2 of your app
+- You push v2 to the registry
+- **The Deployment automatically updates to v2!**
+
+No `oc set image`. No editing YAML. No manual intervention. It just... happens."
+
+[CHECK]
+
+"Sound magical? Let's prove it!"
+
+[TERMINAL]
+
+"First, let's clean up and start fresh with a proper Deployment (not just a pod):"
+
+```bash
+# Delete the test pod
+oc delete pod test-pod
+
+# Create a Deployment that uses ImageStream triggers
+oc create deployment webapp --image=image-registry.openshift-image-registry.svc:5000/image-demo/my-busybox:v1 --dry-run=client -o yaml > webapp-deployment.yaml
+```
+
+[EXPLAIN]
+
+"We're creating the YAML file first so we can add the trigger annotation."
+
+"Now let's edit the file to add the ImageStream trigger. Open webapp-deployment.yaml:"
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  annotations:
+    # THIS IS THE MAGIC LINE!
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"my-busybox:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"webapp\")].image"}]'
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+      - name: webapp
+        image: my-busybox:latest   # Just reference the ImageStream!
+        command: ["sleep", "3600"]
+```
+
+[BREAKDOWN THE TRIGGER ANNOTATION]
+
+"Let me explain that scary-looking annotation:
+
+```json
+{
+  \"from\": {
+    \"kind\": \"ImageStreamTag\",     // Watch an ImageStream
+    \"name\": \"my-busybox:latest\"   // Specifically the 'latest' tag
+  },
+  \"fieldPath\": \"spec.template.spec.containers[?(@.name==\\\"webapp\\\")].image\"
+  // When ImageStream changes, update THIS field in the Deployment
+}
+```
+
+In plain English: 'When my-busybox:latest changes, update the webapp container's image automatically.'"
+
+[TERMINAL]
+
+"But wait - we don't have a 'latest' tag yet. Let's create one by tagging our v1:"
+
+```bash
+# Tag v1 as latest
+oc tag my-busybox:v1 my-busybox:latest
+```
+
+[WHAT THEY'LL SEE]
+
+"You should see:
+```
+Tag my-busybox:latest set to my-busybox@sha256:abc123...
+```"
+
+"Now let's apply the deployment:"
+
+```bash
+oc apply -f webapp-deployment.yaml
+```
+
+"Check it's running:"
+
+```bash
+oc get pods -l app=webapp
+```
+
+"You should see 2 pods running. Let's check which image they're using:"
+
+```bash
+oc get deployment webapp -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+[WHAT THEY'LL SEE]
+
+"You'll see something like: `image-registry.openshift-image-registry.svc:5000/image-demo/my-busybox@sha256:abc123...`
+
+Notice it's using the SHA digest, not just 'latest'. OpenShift resolved the tag to the exact image!"
+
+[PAUSE - important concept]
+
+"This is important: Even though we said 'latest', OpenShift pins it to the exact digest. This means you ALWAYS know what you're running."
+
+---
+
+[SLIDE - "Now Let's Update!"]
+
+"Here comes the magic. We're going to:
+1. Pull a DIFFERENT version of busybox (1.36 instead of 1.35)
+2. Push it as v2
+3. Update the ImageStream 'latest' tag to point to v2
+4. Watch the Deployment automatically update!"
+
+[TERMINAL]
+
+"**Step 1: Pull a different version**"
+
+```bash
+# Pull a specific newer version
+podman pull docker.io/library/busybox:1.36
+```
+
+"**Step 2: Tag and push as v2**"
+
+```bash
+# Tag it for our registry as v2
+podman tag busybox:1.36 $REGISTRY/image-demo/my-busybox:v2
+
+# Push it (use --tls-verify=false if needed)
+podman push $REGISTRY/image-demo/my-busybox:v2
+```
+
+[PAUSE - wait for push]
+
+"**Step 3: Check our ImageStream now has v1 AND v2**"
+
+```bash
+oc get imagestream my-busybox
+```
+
+[WHAT THEY'LL SEE]
+
+"You should see:
+```
+NAME          IMAGE REPOSITORY                         TAGS
+my-busybox    .../image-demo/my-busybox               latest,v1,v2
+```
+
+Both v1 and v2 are there! But 'latest' still points to v1."
+
+"**Step 4: Update 'latest' to point to v2**"
+
+```bash
+oc tag my-busybox:v2 my-busybox:latest
+```
+
+[WHAT HAPPENS NEXT - EXPLAIN SLOWLY]
+
+"NOW watch your pods..."
+
+```bash
+oc get pods -l app=webapp -w
+```
+
+[WHAT THEY'LL SEE]
+
+"You should see something like:
+```
+NAME                      READY   STATUS              
+webapp-abc123-xxx         1/1     Running           
+webapp-abc123-yyy         1/1     Running           
+webapp-def456-aaa         0/1     ContainerCreating  <-- NEW POD!
+webapp-def456-aaa         1/1     Running
+webapp-abc123-xxx         1/1     Terminating        <-- OLD POD DYING!
+...
+```
+
+THE DEPLOYMENT IS ROLLING OUT NEW PODS AUTOMATICALLY! 🎉"
+
+[CELEBRATE]
+
+"We didn't run `oc set image`. We didn't edit the Deployment. We didn't do ANYTHING to the Deployment.
+
+We just updated the ImageStream tag, and OpenShift said: 'Oh, my-busybox:latest changed! Let me update the Deployment for you.'"
+
+[PAUSE - let it sink in]
+
+"**Verify the new image is being used:**"
+
+```bash
+oc get deployment webapp -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+"You'll see a DIFFERENT sha256 digest now - it's using v2!"
+
+---
+
+[SLIDE - "Why This Matters"]
+
+"Let me explain why this is HUGE for production:
+
+**Scenario 1: Continuous Deployment**
+- Your CI/CD pipeline builds a new image
+- Pipeline pushes to registry with tag 'latest'
+- ALL deployments referencing 'latest' auto-update
+- Zero manual work!
+
+**Scenario 2: Rollback**
+- Something's broken in v2
+- Just run: `oc tag my-busybox:v1 my-busybox:latest`
+- Deployments roll back automatically!
+
+**Scenario 3: Promotion**
+- Dev environment uses 'dev' tag
+- QA environment uses 'qa' tag  
+- Prod uses 'prod' tag
+- Promote by: `oc tag my-busybox:qa my-busybox:prod`
+- Production updates automatically!"
+
+[CHECK]
+
+"Now do you see why ImageStreams exist? They're not just 'smart pointers' - they're the foundation of GitOps-style deployments in OpenShift.
+
+Any questions before we wrap up?"
+
+---
+
 ### Wrap-up (3 mins)
 
 [SLIDE - "What We Learned"]
@@ -472,7 +717,9 @@ RUNNING! 🎉 Your pod is using YOUR image from YOUR internal registry!"
 
 6. **Push creates ImageStream** - Automatic! You don't have to create it manually.
 
-7. **Internal URL for pods** - `image-registry.openshift-image-registry.svc:5000`"
+7. **Internal URL for pods** - `image-registry.openshift-image-registry.svc:5000`
+
+8. **🌟 ImageStream Triggers are POWERFUL** - Update the tag, Deployment auto-updates. No manual intervention. This is the foundation of CI/CD in OpenShift!"
 
 [SLIDE - "Cheat Sheet"]
 
